@@ -33,6 +33,17 @@ or later, Node 24 or Node 26 is required.
 A few seconds into each call `chert dev` says what the Mac is taking from your
 agent: video and audio, audio only, or what is wrong.
 
+## Optional Tiger Data telemetry
+
+Set `TIGER_DATABASE_URL` in `.env.local` to your Tiger Cloud PostgreSQL connection
+string to record call start/end, bridge readiness, and agent state changes. Run
+[`sql/001_call_events.sql`](sql/001_call_events.sql) once in Tiger Console first.
+The table is a time-partitioned hypertable. Writes are serialized, and
+`event_seq` preserves each call's event order for live activity queries and later
+dashboards. This stores operational metadata only; it does not store
+audio, transcripts, caller names, or phone numbers. Database errors are logged
+and do not interrupt calls. Leave the variable empty to disable telemetry.
+
 ## The greeting
 
 The Mac ends a call that hears nothing from the agent within 10 seconds of

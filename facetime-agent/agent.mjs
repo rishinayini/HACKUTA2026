@@ -6,6 +6,7 @@ import { LocalVideoTrack, TrackSource, VideoBufferType, VideoFrame, VideoSource 
 import { drawFace, FPS, HEIGHT, WIDTH } from './face.mjs';
 import { runAgent } from './chert-rooms.mjs';
 import { greetOnBridgeReady } from './greet.mjs';
+import { recordCallEvent } from './tiger-data.mjs';
 
 // Change these instructions to build your own agent. Keep replies conversational.
 const instructions = `You are a friendly AI study partner on a FaceTime video call.
@@ -21,6 +22,10 @@ const agent = defineAgent({
     // Chert prepares a room before a caller exists. Join promptly so Chert can
     // find us, but wait before opening a paid model session or sending video.
     const caller = await ctx.waitForParticipant();
+    const callId = ctx.job?.id || ctx.room.name;
+    let callMetadata = {};
+    try { callMetadata = JSON.parse(ctx.job?.metadata || '{}'); } catch { /* metadata is optional */ }
+    void recordCallEvent({ callId, event: 'call_started', media: callMetadata.media });
 
     // Video: one camera track, published by this agent. The Mac shows video only
     // from the participant that speaks, so the picture and the voice stay together.
@@ -47,7 +52,10 @@ const agent = defineAgent({
         },
       }),
     });
-    session.on(voice.AgentSessionEventTypes.AgentStateChanged, event => { speaking = event.newState === 'speaking'; });
+    session.on(voice.AgentSessionEventTypes.AgentStateChanged, event => {
+      speaking = event.newState === 'speaking';
+      void recordCallEvent({ callId, event: 'agent_state', agentState: event.newState });
+    });
     ctx.addShutdownCallback(async () => {
       clearInterval(timer);
       await session.close();
@@ -72,8 +80,12 @@ const agent = defineAgent({
     // room metadata): the Mac ends the call if it hears nothing within 10 seconds
     // of that. Participant arrival alone is not readiness, so there is no greeting
     // on it. Without the signal there is no greeting, and the caller speaks first.
-    const stopGreeting = greetOnBridgeReady(ctx.room, () => session.generateReply({ instructions: greeting }));
+    const stopGreeting = greetOnBridgeReady(ctx.room, () => {
+      void recordCallEvent({ callId, event: 'bridge_ready' });
+      session.generateReply({ instructions: greeting });
+    });
     ctx.addShutdownCallback(async () => stopGreeting());
+    ctx.addShutdownCallback(async reason => recordCallEvent({ callId, event: 'call_ended', details: { reason: String(reason || 'ended').slice(0, 100) } }));
   },
 });
 
