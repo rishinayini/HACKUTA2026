@@ -9,6 +9,10 @@ or later, Node 24 or Node 26 is required.
 - **It sees the caller's camera.** `vision.mjs` reads the caller's video from the call, sends Gemini
   about one JPEG a second (at most 640 pixels wide), and the agent is told to describe drawings and
   workflow diagrams held up to the camera.
+- **It keeps a bounded record of the call.** `context.mjs` holds recent transcript lines with their
+  times, in memory only, and clears them when the call ends. Delegated requests and recovery
+  summaries will read from it.
+- **Long calls.** Context compression is on, so a call with video is not limited to two minutes.
 - **Gemini Live instead of OpenAI.** The model is set by `GEMINI_LIVE_MODEL` in `.env.local`.
 - **The greeting cannot be cut off.** The agent stops listening while it greets, so the call is not
   ended as silent.

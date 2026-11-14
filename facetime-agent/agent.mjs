@@ -7,6 +7,7 @@ import { drawFace, FPS, HEIGHT, WIDTH } from './face.mjs';
 import { runAgent } from './chert-rooms.mjs';
 import { greetOnBridgeReady } from './greet.mjs';
 import { watchCaller } from './vision.mjs';
+import { createCallContext } from './context.mjs';
 
 // Change these instructions to build your own agent. Keep replies conversational.
 const instructions = `You are a friendly AI assistant on a FaceTime video call.
@@ -49,12 +50,29 @@ const agent = defineAgent({
         // Count camera pictures sent while the caller was silent as part of their next question,
         // so "what is this?" covers what was already on screen.
         realtimeInputConfig: { turnCoverage: TurnCoverage.TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO },
+        // Without compression Gemini limits a session with video to about 2 minutes. The sliding
+        // window drops the oldest turns instead. Session resumption and reconnecting when Gemini
+        // announces a disconnect (goAway) are handled by the plugin.
+        contextWindowCompression: { slidingWindow: {} },
       }),
     });
     session.on(voice.AgentSessionEventTypes.AgentStateChanged, event => {
       speaking = event.newState === 'speaking';
       // One line per change, so the log shows exactly when the agent's voice was playing.
       console.log(`[agent] ${new Date().toISOString().slice(11, 23)} ${event.oldState} -> ${event.newState}`);
+    });
+    // What was said on this call, kept in memory with times, for delegated requests and recovery
+    // summaries. Gemini's transcripts of both sides arrive as conversation items.
+    const context = createCallContext();
+    session.on(voice.AgentSessionEventTypes.ConversationItemAdded, event => {
+      const { role, textContent } = event.item ?? {};
+      if (role === 'user' || role === 'assistant') context.add(role === 'user' ? 'user' : 'agent', textContent);
+    });
+    const contextLog = setInterval(() => context.logStats('so far'), 30_000);
+    ctx.addShutdownCallback(async () => {
+      clearInterval(contextLog);
+      context.logStats('call ended, clearing');
+      context.clear();
     });
     ctx.addShutdownCallback(async () => {
       clearInterval(timer);
