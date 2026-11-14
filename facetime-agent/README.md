@@ -4,6 +4,28 @@ A voice agent with a face, for FaceTime Video calls through Chert. It is the voi
 starter plus one camera track: an animated face drawn in `face.mjs`. Node 22.23.2
 or later, Node 24 or Node 26 is required.
 
+## What this version adds
+
+- **It sees the caller's camera.** `vision.mjs` reads the caller's video from the call, sends Gemini
+  about one JPEG a second (at most 640 pixels wide), and the agent is told to describe drawings and
+  workflow diagrams held up to the camera.
+- **Gemini Live instead of OpenAI.** The model is set by `GEMINI_LIVE_MODEL` in `.env.local`.
+- **The greeting cannot be cut off.** The agent stops listening while it greets, so the call is not
+  ended as silent.
+
+## Settings in `.env.local`
+
+| Name | What it is | Where it comes from |
+| --- | --- | --- |
+| `LIVEKIT_URL` | LiveKit project address, `wss://...livekit.cloud` | LiveKit Cloud, Settings, API keys |
+| `LIVEKIT_API_KEY` | LiveKit API key | Same LiveKit project |
+| `LIVEKIT_API_SECRET` | LiveKit API secret | Same LiveKit project |
+| `GOOGLE_API_KEY` | Gemini API key with Live API access | https://aistudio.google.com/apikey |
+| `GEMINI_LIVE_MODEL` | Gemini Live model name (optional) | Defaults to the 2.5 native-audio preview |
+| `AGENT_NAME` | The name the agent registers with | Your choice; `chert dev --agent` must match |
+
+The Chert sign-in is not in this file: `chert login` stores it on the computer.
+
 ## Run it
 
 1. Install it:
@@ -78,7 +100,7 @@ FaceTime call by Chert yet: watch the media line in `chert dev` on your first ca
 
 ## What it does not do
 
-- It does not look at the caller's camera.
+- Seeing the caller needs FaceTime Video and caller capture enabled on the Chert line.
 - The waiting room shows that the agent joined LiveKit. It does not verify the
   model key or the media path. The first call does.
 - Never commit or share `.env.local`. LiveKit and model usage may cost money.
