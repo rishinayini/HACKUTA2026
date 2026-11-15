@@ -26,6 +26,18 @@ or later, Node 24 or Node 26 is required.
 - **Background voice cancellation and faster turns.** LiveKit's background voice cancellation cleans
   the caller's audio, and Gemini ends the caller's turn after half a second of silence
   (`VAD_SILENCE_MS`). `NOISE_CANCELLATION=off` disables the first.
+- **Small text on a whole diagram.** The live model misreads text under about 11 pixels tall in the
+  camera picture. `diagram.mjs` gives it a `read_diagram` tool: the sharpest recent full-size frame is
+  enlarged and sent to a still-image Gemini model (`DIAGRAM_MODEL`), which returns every label, the
+  connections and the notes in about 2 seconds. It picks the sharpest of the last three seconds of
+  frames, so a shaky hand needs only a brief still moment. Tested on generated diagrams, not yet on
+  real handwriting over FaceTime.
+- **A review loop for a project outline.** After each reading, Gemini hands the exact labels and
+  arrows to Nemotron, with the reading before it and the advice already given. Nemotron says what the
+  caller fixed, what is still missing, which tool to use for each part (database, backend, frontend,
+  hosting), and when the outline is complete. The caller changes the drawing and asks again. If
+  Nemotron takes over 10 seconds, a quick answer without its private reasoning is requested as well
+  and the first one to arrive is used.
 - **Answers are not cut off.** In a busy room every answer was being cancelled by more talking, so
   the agent now finishes its answer, then listens. `BARGE_IN=on` lets the caller interrupt again.
 - **Transcript on screen.** `SHOW_TRANSCRIPT=on` prints what was said in the agent's terminal.
@@ -45,11 +57,14 @@ or later, Node 24 or Node 26 is required.
 | `NVIDIA_API_KEY` | NVIDIA key for hosted Nemotron (optional) | https://build.nvidia.com |
 | `NEMOTRON_MODEL` | Nemotron model name | build.nvidia.com model page |
 | `NVIDIA_BASE_URL` | NVIDIA API address (optional) | Defaults to `https://integrate.api.nvidia.com/v1` |
-| `NEMOTRON_TIMEOUT_MS` | Time limit for one delegated request (optional) | Defaults to 10000 |
+| `NEMOTRON_TIMEOUT_MS` | Time limit for one delegated request (optional) | Defaults to 10000; `.env.example` sets 25000 |
+| `NEMOTRON_REASONING` | `low`, `medium` or `high` private reasoning (optional) | Defaults to `low` |
+| `NEMOTRON_HEDGE_MS` | Wait before also asking for a quick answer (optional) | Defaults to 10000 |
 | `PARAKEET` | `on` or `off` for the Parakeet transcript (optional) | Defaults to on when the NVIDIA key is set |
 | `VISION_MAX_WIDTH` | Width of camera pictures sent to Gemini (optional) | Defaults to 1024 |
 | `VAD_SILENCE_MS` | Silence before Gemini answers, in ms (optional) | Defaults to 500 |
 | `NOISE_CANCELLATION` | `on` or `off` (optional) | Defaults to on |
+| `DIAGRAM_MODEL` | Still-image model for the careful diagram read (optional) | Defaults to `gemini-3.5-flash-lite` |
 | `BARGE_IN` | `on` lets the caller interrupt the agent (optional) | Defaults to off |
 | `SHOW_TRANSCRIPT` | `on` prints the transcript in the terminal (optional) | Defaults to off |
 | `AGENT_NAME` | The name the agent registers with | Your choice; `chert dev --agent` must match |

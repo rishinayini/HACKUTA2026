@@ -16,10 +16,12 @@ const stamp = () => new Date().toISOString().slice(11, 23);
  * @param {import('@livekit/rtc-node').Room} room
  * @param {string} callerIdentity the bridge participant, chert-bridge-<call id>
  * @param {(jpegBase64: string, capturedAtMs: number) => void} send
- * @param {{ everyMs?: number, maxWidth?: number, quality?: number }} [options]
+ * @param {{ everyMs?: number, maxWidth?: number, quality?: number, onFullFrame?: (jpeg: Buffer) => void }} [options]
+ * onFullFrame gets the picture at full size about five times a second, for the careful diagram read
+ * (diagram.mjs): with a shaky hand most frames are blurred, and more frames give a better chance of a sharp one.
  * @returns {() => void}
  */
-export function watchCaller(room, callerIdentity, send, { everyMs = 1000, maxWidth = 640, quality = 70 } = {}) {
+export function watchCaller(room, callerIdentity, send, { everyMs = 1000, maxWidth = 640, quality = 70, onFullFrame } = {}) {
   let stopped = false;
   let current = 0;          // which track is being read: a replaced track stops the older reader
   let sent = 0;
@@ -28,12 +30,20 @@ export function watchCaller(room, callerIdentity, send, { everyMs = 1000, maxWid
     const mine = ++current;
     console.log(`[vision] ${stamp()} caller camera connected`);
     const reader = new VideoStream(track).getReader();
-    let last = 0, busy = false;
+    let last = 0, busy = false, lastFull = 0, fullBusy = false;
     try {
       for (;;) {
         const { value, done } = await reader.read();
         if (done || stopped || mine !== current) break;
         const now = Date.now();
+        if (onFullFrame && !fullBusy && now - lastFull >= 200) {
+          lastFull = now; fullBusy = true;
+          const rgba = value.frame.convert(VideoBufferType.RGBA);
+          sharp(Buffer.from(rgba.data), { raw: { width: rgba.width, height: rgba.height, channels: 4 } }).jpeg({ quality: 90 }).toBuffer()
+            .then(full => { if (!stopped && mine === current) onFullFrame(full); })
+            .catch(() => {})
+            .finally(() => { fullBusy = false; });
+        }
         if (busy || now - last < everyMs) continue;   // drop frames in between: only the newest matters
         last = now; busy = true;
         try {

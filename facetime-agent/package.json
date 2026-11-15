@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node --env-file=.env.local agent.mjs start",
-    "check": "node --check chert-rooms.mjs && node --check agent.mjs && node --check face.mjs && node --check greet.mjs && node --check vision.mjs && node --check context.mjs && node --check nemotron.mjs && node --check greeting-audio.mjs && node --check parakeet.mjs",
+    "check": "node --check chert-rooms.mjs && node --check agent.mjs && node --check face.mjs && node --check greet.mjs && node --check vision.mjs && node --check context.mjs && node --check nemotron.mjs && node --check greeting-audio.mjs && node --check parakeet.mjs && node --check diagram.mjs",
     "test": "node --test test/",
     "help": "node agent.mjs --help"
   },

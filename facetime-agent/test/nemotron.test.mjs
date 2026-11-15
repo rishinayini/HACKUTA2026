@@ -43,6 +43,40 @@ test('packages the visual context and recent transcript with times', async () =>
   assert.equal(context.recent({ kinds: ['visual'] }).length, 1);
 });
 
+test('a review round gets the diagram now, the diagram before, and the advice already given', async () => {
+  const context = createCallContext();
+  context.add('diagram', 'Steps: oldest'); context.add('diagram', 'Steps: Login, Feed');
+  let body;
+  const nemotron = createNemotron({ env, context, fetch: async (_u, init) => { body = JSON.parse(init.body); return reply({ content: 'Add a database.' }); } });
+  await nemotron.ask(args);
+  context.add('diagram', 'Steps: Login, Feed, Postgres');
+  await nemotron.ask(args);
+  const user = body.messages.at(-1).content;
+  assert.match(user, /as it is now[^\n]*\nSteps: Login, Feed, Postgres/);
+  assert.match(user, /reading before this one:\nSteps: Login, Feed\n/);
+  assert.match(user, /already gave[^\n]*\n- Add a database\./);
+  assert.doesNotMatch(user, /Steps: oldest/);
+});
+
+test('without a diagram reading, answers are not kept as diagram advice', async () => {
+  const context = createCallContext();
+  const nemotron = createNemotron({ env, context, fetch: async () => reply({ content: 'A plan.' }) });
+  await nemotron.ask(args);
+  assert.equal(context.recent({ kinds: ['advice'] }).length, 0);
+});
+
+test('when the full answer is slow, a quick answer without reasoning is asked for and used', async () => {
+  const bodies = [];
+  const fetch = (_url, init) => { const body = JSON.parse(init.body); bodies.push(body);
+    return body.chat_template_kwargs ? Promise.resolve(reply({ content: 'quick answer' })) : new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted')))); };
+  const nemotron = createNemotron({ env: { ...env, NEMOTRON_HEDGE_MS: '20' }, fetch });
+  const result = await nemotron.ask(args);
+  assert.equal(result.answer, 'quick answer');
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[1].chat_template_kwargs.enable_thinking, false);
+  assert.equal(nemotron.busy, false);
+});
+
 test('a second call while one is running is told busy at once', async () => {
   const provider = slowProvider();
   const nemotron = createNemotron({ env: { ...env, NEMOTRON_TIMEOUT_MS: '2000' }, fetch: provider.fetch });

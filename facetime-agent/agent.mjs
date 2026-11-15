@@ -12,20 +12,32 @@ import { createCallContext } from './context.mjs';
 import { greetingFrames, loadGreetingAudio } from './greeting-audio.mjs';
 import { createTranscriber, parakeetConfigured, transcribeCaller } from './parakeet.mjs';
 import { askNemotronParameters, createNemotron, nemotronConfigured } from './nemotron.mjs';
+import { createDiagramReader, readDiagramParameters } from './diagram.mjs';
 
 // Change these instructions to build your own agent. Keep replies conversational.
-const instructions = `You are a friendly AI assistant on a live video call. Your main job is to review
-project workflow diagrams that the caller holds up to the camera, and to give advice on them.
+const instructions = `You are a friendly AI assistant on a live video call. Your main job is to help the
+caller get the outline of a project right: they draw it as a workflow diagram on a whiteboard or paper,
+show it to the camera, change it as you advise, and show it again, round after round, until it is complete.
 You hear the caller directly and you see what their camera shows, about one picture a second.
 
-When the caller shows a diagram or asks about one:
-- First read it from start to end: name each step in order, following the arrows, and mention
-  branches, loops and any handwritten notes. Say this briefly so the caller can correct you.
-- Then give advice: point out the one or two most important problems or risks, such as a missing
-  step, a bottleneck, a step with no owner, an unclear decision, or a dead end, and suggest a fix.
+Your own view of small text is unreliable, so you have a tool, read_diagram, that reads the camera
+picture carefully and returns every label, the connections and the notes. It takes a few seconds.
+
+When the caller shows a diagram on paper or a whiteboard, or asks about one:
+- First say one short sentence such as "Keep it in view, give me a few seconds to read it properly",
+  then call read_diagram. Call it again whenever they show a new or changed diagram, or a closer view.
+- Use the labels from the reading, never your own guess at small text. Say the steps briefly from
+  start to end, following the arrows, so the caller can correct you.
+- Then give advice: what is missing, such as a step, an owner, an approval or a path for when a step
+  fails, and one or two better alternatives.
 - Answer what the caller actually asked. If they ask about one step, talk about that step.
-- If part of the diagram is too small, blurry, cut off or hidden, say which part and ask them to
-  hold it closer or steadier. Never guess a label or a number you cannot read.
+- This is a loop. When the caller says they have added or changed something, or asks you to look again,
+  call read_diagram again before you answer: never rely on an earlier reading or on your own view. Then
+  say briefly what changed, and give the next advice.
+- You only look when the caller speaks to you. If they are drawing quietly, wait.
+- If the reading marks a part as unreadable, say which part and ask them to hold that part closer
+  or steadier, then read again. Never guess a label or a number.
+- If the tool reports an error, say so briefly and describe only what you can see clearly yourself.
 If you see no camera picture, say so plainly. Never invent details you cannot see.
 The caller sees a simple animated face while you talk.
 Keep each reply to a few short sentences, and let the caller steer. Be clear that you are an AI.
@@ -33,11 +45,17 @@ The caller may be in a noisy room and may talk to other people nearby. Answer wh
 do not comment on side conversations that are not meant for you.`;
 // Added to the instructions only when the NVIDIA settings are present.
 const delegationInstructions = `
-You have a tool, ask_nemotron, that hands a task to a stronger reasoning model. Use it only when the
-caller asks for a full plan, a deep step-by-step analysis of a whole workflow, a detailed explanation, or a
-summary of the call. Give quick advice on a diagram yourself. Do not use it for greetings, small talk or simple questions you can answer yourself.
-Before you call it, say one short sentence such as "Give me a moment to think that through", because it
-takes several seconds. In visual_context, describe what you actually see that matters. When the answer
+You have a tool, ask_nemotron, that hands a task to a stronger reasoning model. It is better than you at
+judging a workflow, so the advice on a diagram comes from it, not from you: after read_diagram, say the
+steps in one or two sentences, then say "Let me think about what is missing", and call ask_nemotron with
+the caller's question as the task. Do this on every round, after every new reading. It receives the
+diagram reading, the reading before it and its own earlier advice automatically; it will say what is
+missing, which tool to use for each part (database, backend, frontend and so on), and when the outline
+is complete. In known_facts, pass what the caller has told you about the project: what it does, the
+deadline, the team and any tools they already chose. Also use it when the caller asks for a full plan, a detailed
+explanation, or a summary of the call. Do not use it for greetings, small talk or simple questions.
+Before you call it, say one short sentence, because it takes several seconds. In visual_context,
+describe what you actually see that matters. When the answer
 comes back, say it to the caller in your own words in a few sentences. If the tool reports an error,
 tell the caller briefly and answer as well as you can yourself.`;
 // Said once, as soon as FaceTime is ready. These exact words are recorded ahead of time (see
@@ -89,13 +107,22 @@ const agent = defineAgent({
     // Delegated reasoning through NVIDIA's hosted Nemotron, when its key and model are set.
     const delegate = nemotronConfigured();
     const nemotron = createNemotron({ context });
-    const tools = delegate ? {
-      ask_nemotron: llm.tool({
-        description: 'Hand a planning, analysis, deeper-reasoning or summary task to a stronger reasoning model. Takes several seconds. Only one request can run at a time.',
-        parameters: askNemotronParameters,
-        execute: async (args, options) => nemotron.ask(args, options?.abortSignal),
+    // The careful read of a whole diagram, from the sharpest recent full-size camera frame.
+    const diagram = createDiagramReader({ context });
+    const tools = {
+      read_diagram: llm.tool({
+        description: 'Read the diagram the caller is showing, accurately, including small text: labels, connections, notes and suggestions. Takes up to 20 seconds. Use it before describing or reviewing any diagram.',
+        parameters: readDiagramParameters,
+        execute: async (args, options) => diagram.read(args, options?.abortSignal),
       }),
-    } : undefined;
+      ...(delegate ? {
+        ask_nemotron: llm.tool({
+          description: 'Hand a planning, analysis, deeper-reasoning or summary task to a stronger reasoning model. Takes several seconds. Only one request can run at a time.',
+          parameters: askNemotronParameters,
+          execute: async (args, options) => nemotron.ask(args, options?.abortSignal),
+        }),
+      } : {}),
+    };
 
     const session = new voice.AgentSession({
       // Gemini Live. Reads GOOGLE_API_KEY from .env.local. Keep a 2.5 model: the
@@ -194,8 +221,8 @@ const agent = defineAgent({
         type: 'realtime_input',
         value: { mediaChunks: [{ mimeType: 'image/jpeg', data: jpegBase64 }] },
       });
-    }, { maxWidth: VISION_WIDTH, quality: 80 });
-    ctx.addShutdownCallback(async () => stopWatching());
+    }, { maxWidth: VISION_WIDTH, quality: 80, onFullFrame: jpeg => diagram.addFrame(jpeg) });
+    ctx.addShutdownCallback(async () => { stopWatching(); diagram.clear(); });
   },
 });
 

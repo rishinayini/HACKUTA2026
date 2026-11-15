@@ -7,7 +7,7 @@
 const stamp = () => new Date().toISOString().slice(11, 23);
 
 /**
- * @typedef {{ atMs: number, kind: 'user' | 'agent' | 'visual', text: string }} Entry
+ * @typedef {{ atMs: number, kind: 'user' | 'agent' | 'visual' | 'diagram' | 'advice', text: string }} Entry
  * atMs is milliseconds since the call started, on the agent's monotonic clock.
  */
 
