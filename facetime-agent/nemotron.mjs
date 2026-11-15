@@ -34,7 +34,7 @@ const SYSTEM = `You are a reasoning assistant working behind a live voice agent.
 and cannot think for long, so it hands you tasks such as planning, analysing a workflow, or summarising.
 You get the task, the agent's description of what it sees, known facts, and recent transcript lines with
 their time into the call. You cannot see or hear the call yourself: treat the visual description as a
-report, not as your own observation. Answer in plain sentences that can be read aloud, at most 120 words,
+report, not as your own observation. Answer in plain sentences that can be read aloud, at most 80 words,
 with no markdown, lists or headings. If the information given is not enough, say what is missing.`;
 
 /**
@@ -45,7 +45,7 @@ with no markdown, lists or headings. If the information given is not enough, say
 export function createNemotron({ env = process.env, fetch: request = fetch, context } = {}) {
   const base = (env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/+$/, '');
   const timeoutMs = Number(env.NEMOTRON_TIMEOUT_MS) > 0 ? Number(env.NEMOTRON_TIMEOUT_MS) : 10_000;
-  const maxTokens = Number(env.NEMOTRON_MAX_TOKENS) > 0 ? Number(env.NEMOTRON_MAX_TOKENS) : 700;
+  const maxTokens = Number(env.NEMOTRON_MAX_TOKENS) > 0 ? Number(env.NEMOTRON_MAX_TOKENS) : 450;
   let busy = false;
   const fail = (code, message) => ({ ok: false, error: code, message });
 
@@ -62,7 +62,7 @@ export function createNemotron({ env = process.env, fetch: request = fetch, cont
       const limit = AbortSignal.timeout(timeoutMs);
       const stop = signal ? AbortSignal.any([signal, limit]) : limit;
       context?.add('visual', visual);
-      const transcript = context?.asText({ limit: 12, kinds: ['user', 'agent', 'summary'] }) || '(no transcript yet)';
+      const transcript = context?.asText({ limit: 12, kinds: ['user', 'agent'] }) || '(no transcript yet)';
       const user = `Task: ${task}\n\nWhat the voice agent sees: ${visual || 'not stated'}\n\nKnown facts: ${facts || 'none'}\n\nRecent transcript (time into the call):\n${transcript}`;
       try {
         const response = await request(`${base}/chat/completions`, {

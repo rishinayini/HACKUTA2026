@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { AutoSubscribe, defineAgent, llm, voice } from '@livekit/agents';
 import { realtime } from '@livekit/agents-plugin-google';
-import { EndSensitivity, StartSensitivity, TurnCoverage } from '@google/genai';
+import { ActivityHandling, EndSensitivity, TurnCoverage } from '@google/genai';
 import { BackgroundVoiceCancellation } from '@livekit/noise-cancellation-node';
 import { LocalVideoTrack, TrackSource, VideoBufferType, VideoFrame, VideoSource } from '@livekit/rtc-node';
 import { drawFace, FPS, HEIGHT, WIDTH } from './face.mjs';
@@ -28,7 +28,9 @@ When the caller shows a diagram or asks about one:
   hold it closer or steadier. Never guess a label or a number you cannot read.
 If you see no camera picture, say so plainly. Never invent details you cannot see.
 The caller sees a simple animated face while you talk.
-Keep each reply to a few short sentences, and let the caller steer. Be clear that you are an AI.`;
+Keep each reply to a few short sentences, and let the caller steer. Be clear that you are an AI.
+The caller may be in a noisy room and may talk to other people nearby. Answer what is said to you;
+do not comment on side conversations that are not meant for you.`;
 // Added to the instructions only when the NVIDIA settings are present.
 const delegationInstructions = `
 You have a tool, ask_nemotron, that hands a task to a stronger reasoning model. Use it only when the
@@ -51,6 +53,10 @@ const SILENCE_MS = Number(process.env.VAD_SILENCE_MS) > 0 ? Number(process.env.V
 // Width in pixels of the camera pictures sent to Gemini. At 640 it misread small handwriting on a
 // test diagram ("3 days" as "9 days"); at 1024 it read it correctly. VISION_MAX_WIDTH overrides it.
 const VISION_WIDTH = Number(process.env.VISION_MAX_WIDTH) > 0 ? Number(process.env.VISION_MAX_WIDTH) : 1024;
+// Whether talking can cut the agent off. Off by default: on a real call in a busy room, every answer
+// was cancelled by more talking before any sound came out, and a question went unanswered for over a
+// minute. With it off the agent finishes its answer, then listens. BARGE_IN=on restores interrupting.
+const BARGE_IN = String(process.env.BARGE_IN ?? '').toLowerCase() === 'on';
 // NOISE_CANCELLATION=off sends the call audio to the models as it is.
 const CLEAN_AUDIO = String(process.env.NOISE_CANCELLATION ?? '').toLowerCase() !== 'off';
 const MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
@@ -78,8 +84,7 @@ const agent = defineAgent({
     await ctx.room.localParticipant.publishTrack(track, { source: TrackSource.SOURCE_CAMERA });
     const timer = setInterval(frame, 1000 / FPS);
 
-    // What was said on this call, kept in memory with times, for delegated requests and recovery
-    // summaries.
+    // What was said on this call, kept in memory with times, for delegated requests.
     const context = createCallContext();
     // Delegated reasoning through NVIDIA's hosted Nemotron, when its key and model are set.
     const delegate = nemotronConfigured();
@@ -102,14 +107,9 @@ const agent = defineAgent({
         // so "what is this?" covers what was already on screen.
         realtimeInputConfig: {
           turnCoverage: TurnCoverage.TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO,
+          ...(BARGE_IN ? {} : { activityHandling: ActivityHandling.NO_INTERRUPTION }),
           // Answer sooner: end the caller's turn after a short silence, and be quick to notice it.
-          // VAD_START_SENSITIVITY=low makes Gemini need clearer speech before it counts a turn as
-          // started; it is left at Gemini's default because noise cancellation already removes the room.
-          automaticActivityDetection: {
-            silenceDurationMs: SILENCE_MS,
-            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-            ...(String(process.env.VAD_START_SENSITIVITY ?? '').toLowerCase() === 'low' ? { startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW } : {}),
-          },
+          automaticActivityDetection: { silenceDurationMs: SILENCE_MS, endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH },
         },
         // Without compression Gemini limits a session with video to about 2 minutes. The sliding
         // window drops the oldest turns instead. Session resumption and reconnecting when Gemini

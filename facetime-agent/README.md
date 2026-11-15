@@ -10,8 +10,7 @@ or later, Node 24 or Node 26 is required.
   about one JPEG a second, and the agent is told to describe drawings and
   workflow diagrams held up to the camera.
 - **It keeps a bounded record of the call.** `context.mjs` holds recent transcript lines with their
-  times, in memory only, and clears them when the call ends. Delegated requests and recovery
-  summaries will read from it.
+  times, in memory only, and clears them when the call ends. Delegated requests read from it.
 - **Long calls.** Context compression is on, so a call with video is not limited to two minutes.
 - **Gemini Live instead of OpenAI.** The model is set by `GEMINI_LIVE_MODEL` in `.env.local`.
 - **The greeting is a recording.** `greeting-audio.mjs` records the greeting once with Gemini, in the
@@ -27,6 +26,8 @@ or later, Node 24 or Node 26 is required.
 - **Background voice cancellation and faster turns.** LiveKit's background voice cancellation cleans
   the caller's audio, and Gemini ends the caller's turn after half a second of silence
   (`VAD_SILENCE_MS`). `NOISE_CANCELLATION=off` disables the first.
+- **Answers are not cut off.** In a busy room every answer was being cancelled by more talking, so
+  the agent now finishes its answer, then listens. `BARGE_IN=on` lets the caller interrupt again.
 - **Transcript on screen.** `SHOW_TRANSCRIPT=on` prints what was said in the agent's terminal.
 - **Delegated reasoning.** `nemotron.mjs` gives Gemini an `ask_nemotron` tool that hands planning,
   analysis and summary tasks to a hosted NVIDIA Nemotron model: text only, one request at a time,
@@ -49,6 +50,7 @@ or later, Node 24 or Node 26 is required.
 | `VISION_MAX_WIDTH` | Width of camera pictures sent to Gemini (optional) | Defaults to 1024 |
 | `VAD_SILENCE_MS` | Silence before Gemini answers, in ms (optional) | Defaults to 500 |
 | `NOISE_CANCELLATION` | `on` or `off` (optional) | Defaults to on |
+| `BARGE_IN` | `on` lets the caller interrupt the agent (optional) | Defaults to off |
 | `SHOW_TRANSCRIPT` | `on` prints the transcript in the terminal (optional) | Defaults to off |
 | `AGENT_NAME` | The name the agent registers with | Your choice; `chert dev --agent` must match |
 
