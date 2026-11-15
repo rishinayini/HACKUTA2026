@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { endFaceTimeCall, startFaceTimeCall, useLiveCall } from "./live";
+import AgentCamera from "./AgentCamera";
 
 type Screen = "login" | "home" | "call" | "logs" | "settings";
 
@@ -500,10 +502,25 @@ function Meeting({
   endMeeting: () => void;
 } & MeetingControlProps) {
   const [ending, setEnding] = useState(false);
+  const live = useLiveCall();
+  // A real FaceTime call replaces the sample conversation.
+  const shownMessages = live.seen ? live.messages : transcriptMessages;
+
+  // The length of the real call, counted from when it was answered.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live.active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [live.active]);
+  const elapsed = Math.max(0, Math.floor((now - (live.startedAt ?? now)) / 1000));
+  const callLength = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
 
   async function endCall() {
     if (ending) return;
     setEnding(true);
+    // A real call is hung up by the agent; FaceTime then ends on the caller's side too.
+    if (live.active) await endFaceTimeCall();
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
     endMeeting();
   }
@@ -514,7 +531,7 @@ function Meeting({
         <section className="video-stage">
           <div className="call-title">
             <h1>Northy</h1>
-            <p>Connected · 04:32</p>
+            <p>{live.active ? `On FaceTime · ${callLength}` : live.seen ? "Call ended" : "Connected · 04:32"}</p>
           </div>
           {controls.camera && (
             <div className="self-preview">
@@ -522,15 +539,15 @@ function Meeting({
               <span>You</span>
             </div>
           )}
-          <img className="main-avatar" src={icons.mainAvatar} alt="Northy avatar" />
-          <div className="speaking">
-            <AudioLevels /> Northy is speaking
-          </div>
-          <blockquote>
-            “I can see the draft.
-            <br />
-            Let’s review the opening slide first.”
-          </blockquote>
+          <AgentCamera
+            className="main-avatar"
+            fallback={<img className="main-avatar" src={icons.mainAvatar} alt="Northy avatar" />}
+          />
+          {(live.seen ? live.speaking : true) && (
+            <div className="speaking">
+              <AudioLevels /> Northy is speaking
+            </div>
+          )}
           <div className="call-controls">
             <button onClick={minimize} aria-label="Minimize meeting and go home">
               <img src={icons.home} alt="" />
@@ -590,13 +607,13 @@ function Meeting({
             </div>
             <div className="message-list">
               <time>TODAY · 10:30 AM</time>
-              {transcriptMessages.map((message, index) => (
+              {shownMessages.map((message, index) => (
                 <div className={`message ${message.from}`} key={`${message.from}-${index}`}>
                   <strong>{message.from === "ai" ? "Northy · AI" : "You"}</strong>
                   <p>{message.text}</p>
                 </div>
               ))}
-              <small>Northy is speaking…</small>
+              {(live.seen ? live.speaking : true) && <small>Northy is speaking…</small>}
             </div>
           </aside>
         )}
@@ -620,9 +637,15 @@ function ChatLogs({
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState(false);
   const transcriptEnd = useRef<HTMLDivElement>(null);
+  const live = useLiveCall();
+
+  useEffect(() => {
+    if (live.active) setSelectedCallId("live");
+  }, [live.active]);
 
   useEffect(() => {
     if (
+      live.seen ||
       !meetingActive ||
       !capturing ||
       messages.length >= transcriptMessages.length + liveMessageQueue.length
@@ -633,16 +656,16 @@ function ChatLogs({
       setMessages((current) => [...current, nextMessage]);
     }, 4200);
     return () => window.clearTimeout(timeout);
-  }, [capturing, meetingActive, messages.length]);
+  }, [capturing, live.seen, meetingActive, messages.length]);
 
   useEffect(() => {
     if (selectedCallId === "live") {
       transcriptEnd.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }, [messages.length, selectedCallId]);
+  }, [messages.length, live.messages.length, selectedCallId]);
 
   const selectedCall = callHistory.find((call) => call.id === selectedCallId);
-  const selectedMessages = selectedCall?.messages ?? messages;
+  const selectedMessages = selectedCall?.messages ?? (live.seen ? live.messages : messages);
   const filteredMessages = selectedMessages.filter((message) =>
     message.text.toLowerCase().includes(query.trim().toLowerCase()),
   );
@@ -1025,6 +1048,47 @@ export default function App() {
     window.localStorage.setItem("noteworthy-meeting-controls", JSON.stringify(meetingControls));
   }, [meetingControls]);
 
+  // A FaceTime call to the agent brings up the call screen by itself, and ends it.
+  const miniApp = new URLSearchParams(window.location.search).has("mini");
+  const live = useLiveCall();
+  useEffect(() => {
+    if (live.active) {
+      setPageLoading(null);
+      setMeetingActive(true);
+      // The mini Mac app (?mini=1) goes to the chat log of the live call; the browser shows the meeting.
+      setScreen(miniApp ? "logs" : "call");
+    } else if (live.seen) {
+      // Hanging up on FaceTime ends the call here too. The mini app stays where it is.
+      setMeetingActive(false);
+      if (!miniApp) setScreen((current) => (current === "call" ? "home" : current));
+      // A tab that was opened for this call (?live=1) closes itself when the call is over.
+      // A tab the person opened themselves stays. Browsers allow this only for a tab that
+      // has not navigated anywhere else; otherwise it simply stays on the home screen.
+      const openedForCall = new URLSearchParams(window.location.search).has("live");
+      const justEnded = live.endedAt !== null && Date.now() - live.endedAt < 10_000;
+      if (openedForCall && justEnded) window.setTimeout(() => window.close(), 1500);
+    }
+  }, [live.active, live.seen, live.endedAt]);
+
+  // "Call" opens FaceTime on this Mac; the call screen appears when the agent answers.
+  async function startCall() {
+    const result = await startFaceTimeCall();
+    if (!result.ok) {
+      const message = result.error === "no_line"
+        ? "Add FACETIME_LINE to facetime-agent/.env.local to call Northy."
+        : result.error === "open_failed"
+          ? "Could not open FaceTime on this Mac."
+          : result.error === "not_macos"
+            ? "Starting a FaceTime call requires the Mac running this app."
+            : "Could not start the FaceTime call.";
+      setPageLoading(message);
+      window.setTimeout(() => setPageLoading((current) => (current === message ? null : current)), 5000);
+      return;
+    }
+    setPageLoading("Opening FaceTime — confirm the call there…");
+    window.setTimeout(() => setPageLoading((message) => (message?.startsWith("Opening FaceTime") ? null : message)), 45_000);
+  }
+
   function updateMeetingControls(updates: Partial<MeetingControls>) {
     setMeetingControls((current) => ({ ...current, ...updates }));
   }
@@ -1069,7 +1133,7 @@ export default function App() {
     <Home
       go={navigate}
       meetingActive={meetingActive}
-      startCall={() => void loadInto("call", "Connecting you with Northy…", 1450)}
+      startCall={() => void startCall()}
     />
   );
 }

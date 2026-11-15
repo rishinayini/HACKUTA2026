@@ -13,6 +13,7 @@ import { greetingFrames, loadGreetingAudio } from './greeting-audio.mjs';
 import { createTranscriber, parakeetConfigured, transcribeCaller } from './parakeet.mjs';
 import { askNemotronParameters, createNemotron, nemotronConfigured } from './nemotron.mjs';
 import { createDiagramReader, readDiagramParameters } from './diagram.mjs';
+import { emitCallEvent, watchHangup } from './events.mjs';
 
 // Change these instructions to build your own agent. Keep replies conversational.
 const instructions = `You are a friendly AI assistant on a live video call. Your main job is to help the
@@ -145,7 +146,9 @@ const agent = defineAgent({
       }),
     });
     session.on(voice.AgentSessionEventTypes.AgentStateChanged, event => {
+      const wasSpeaking = speaking;
       speaking = event.newState === 'speaking';
+      if (speaking !== wasSpeaking) emitCallEvent('agent_state', { speaking });
       // One line per change, so the log shows exactly when the agent's voice was playing.
       console.log(`[agent] ${new Date().toISOString().slice(11, 23)} ${event.oldState} -> ${event.newState}`);
     });
@@ -155,8 +158,19 @@ const agent = defineAgent({
     // SHOW_TRANSCRIPT=on prints each line in this terminal as it arrives, with who said it and which
     // recogniser wrote it. Off by default: the logs otherwise never contain what was said.
     const showTranscript = String(process.env.SHOW_TRANSCRIPT ?? '').toLowerCase() === 'on';
+    // The web app and the transcript widget follow the call through this local feed.
+    emitCallEvent('call_started', { room: ctx.room.name });
+    // "End call" in the web app: deleting the room disconnects the FaceTime bridge, which hangs up.
+    const stopHangupWatch = watchHangup(async () => {
+      console.log(`[agent] ${new Date().toISOString().slice(11, 23)} the web app asked to end the call`);
+      await ctx.deleteRoom();
+      ctx.shutdown('ended from the web app');
+    });
+    ctx.addShutdownCallback(async () => stopHangupWatch());
+    ctx.addShutdownCallback(async () => emitCallEvent('call_ended'));
     const record = (kind, text, source) => {
       context.add(kind, text);
+      if (String(text ?? '').trim()) emitCallEvent('transcript', { from: kind === 'user' ? 'you' : 'ai', text: String(text).trim(), source });
       if (showTranscript && String(text ?? '').trim()) console.log(`[transcript] ${new Date().toISOString().slice(11, 19)} ${kind === 'user' ? 'caller' : 'agent'} (${source}): ${String(text).trim()}`);
     };
     const transcriber = parakeetConfigured() ? createTranscriber({ onFinal: text => record('user', text, 'parakeet') }) : undefined;

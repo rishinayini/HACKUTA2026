@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import crypto from "node:crypto";
+import type { ServerResponse } from "node:http";
 
 import siteConfiguration from "./.figma/make/site.json";
 
@@ -25,6 +28,7 @@ export default defineConfig(({ mode }) => {
       figmaReactRefreshBoundaryFallback(),
       figmaMakeKitPlugin({ storiesGlob: "/src/**/*.stories.{ts,tsx,js,jsx}" }),
       figmaLinkedPackageSourcemaps(),
+      callEvents(),
     ],
     resolve: {
       alias: {
@@ -486,6 +490,162 @@ function figmaLinkedPackageSourcemaps(): Plugin {
       });
       delete map.sourceRoot;
       return { code: code.replace(sourceMappingUrl, ""), map };
+    },
+  };
+}
+
+/**
+ * Live FaceTime call feed. The agent in ../facetime-agent appends one JSON line per event to
+ * .cache/call-events.jsonl; this serves them to the page as server-sent events at
+ * /api/call-events, replaying the latest call to a page that connects late. When a call starts
+ * and no page is open, it opens the web app and the transcript widget.
+ * Dev server only. Set CALL_AUTO_OPEN=off to stop it opening windows.
+ */
+function callEvents(): Plugin {
+  const file = path.resolve(__dirname, "../facetime-agent/.cache/call-events.jsonl");
+  const autoOpen = String(process.env.CALL_AUTO_OPEN ?? "").toLowerCase() !== "off";
+  return {
+    name: "call-events",
+    apply: "serve",
+    configureServer(server) {
+      const clients = new Set<{ res: ServerResponse; role: string }>();
+      let offset = 0;
+      let current: string[] = [];
+      const origin = () => `http://localhost:${server.config.server.port}`;
+      const has = (role: string) => [...clients].some((client) => client.role === role);
+      const openWindows = () => {
+        if (!autoOpen) return;
+        if (!has("app")) execFile("open", [`${origin()}/?live=1`], () => {});
+        // The NoteWorthy Mac app when it has been built (../transcript-app/build.sh): opening it
+        // again brings its panel forward on the chat log and live transcript. Without it, the
+        // transcript opens as a small Chrome window.
+        const app = path.resolve(__dirname, "../transcript-app/build/NoteWorthy.app");
+        if (fs.existsSync(app)) execFile("open", ["-a", app], () => {});
+        else if (!has("widget"))
+          execFile(
+            "open",
+            ["-na", "Google Chrome", "--args", `--app=${origin()}/?widget=1`, "--window-size=380,620"],
+            () => {},
+          );
+      };
+      const closeFaceTime = () => {
+        if (process.platform !== "darwin") return;
+        execFile("osascript", ["-e", 'tell application "FaceTime" to quit'], () => {});
+      };
+      const poll = () => {
+        let size = 0;
+        try {
+          size = fs.statSync(file).size;
+        } catch {
+          return;
+        }
+        if (size < offset) offset = 0; // the agent emptied the file for a new call
+        if (size === offset) return;
+        const buffer = Buffer.alloc(size - offset);
+        const fd = fs.openSync(file, "r");
+        fs.readSync(fd, buffer, 0, buffer.length, offset);
+        fs.closeSync(fd);
+        const end = buffer.lastIndexOf(10);
+        if (end < 0) return; // wait for the rest of the line
+        offset += end + 1;
+        for (const line of buffer.subarray(0, end).toString("utf8").split("\n")) {
+          let event: { type?: string; at?: number };
+          try {
+            event = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (event.type === "call_started") {
+            current = [];
+            if (Date.now() - (event.at ?? 0) < 30_000) openWindows();
+          }
+          if (event.type === "call_ended") closeFaceTime();
+          current.push(line);
+          for (const client of clients) client.res.write(`data: ${line}\n\n`);
+        }
+      };
+      const timer = setInterval(poll, 300);
+      server.httpServer?.on("close", () => clearInterval(timer));
+      // Values from an env file, read on each request so edits need no restart.
+      const readEnv = (envFile: string) => {
+        const values: Record<string, string> = {};
+        try {
+          for (const line of fs.readFileSync(envFile, "utf8").split("\n")) {
+            const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+            if (match) values[match[1]] = match[2].trim();
+          }
+        } catch {}
+        return values;
+      };
+      const json = (res: ServerResponse, status: number, body: object) => {
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(body));
+      };
+      const b64 = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+      // Start a call, end it, and hand out a watch-only LiveKit token. These act on this
+      // computer and use its keys, so they answer only to this computer.
+      server.middlewares.use((req, res, next) => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        if (!url.pathname.startsWith("/api/call/")) return next();
+        const from = req.socket.remoteAddress ?? "";
+        if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(from))
+          return json(res, 403, { error: "local_only" });
+
+        if (url.pathname === "/api/call/start" && req.method === "POST") {
+          if (process.platform !== "darwin") return json(res, 501, { error: "not_macos" });
+          const line = readEnv(path.resolve(__dirname, "../facetime-agent/.env.local")).FACETIME_LINE ?? "";
+          if (!/^\+?[0-9]{7,15}$/.test(line)) return json(res, 501, { error: "no_line" });
+          // FaceTime asks the person to confirm before it dials.
+          execFile("open", [`facetime://${line}`], (error) =>
+            json(res, error ? 500 : 200, error ? { error: "open_failed" } : { ok: true }),
+          );
+          return;
+        }
+        if (url.pathname === "/api/call/end" && req.method === "POST") {
+          try {
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(path.join(path.dirname(file), "hangup"), String(Date.now()));
+            // The agent also deletes the LiveKit room; quit the local FaceTime app for this call.
+            closeFaceTime();
+            return json(res, 200, { ok: true });
+          } catch {
+            return json(res, 500, { error: "write_failed" });
+          }
+        }
+        if (url.pathname === "/api/call/token" && req.method === "GET") {
+          const env = readEnv(path.resolve(__dirname, "../facetime-agent/.env.local"));
+          const room = url.searchParams.get("room") ?? "";
+          if (!room || !env.LIVEKIT_URL || !env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET)
+            return json(res, 501, { error: "no_livekit" });
+          // A hidden participant that can only watch: it publishes nothing, so the call's
+          // one-speaker rule is untouched, and the other participants do not see it.
+          const now = Math.floor(Date.now() / 1000);
+          const body = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({
+            iss: env.LIVEKIT_API_KEY,
+            sub: `web-viewer-${crypto.randomUUID().slice(0, 8)}`,
+            nbf: now - 10,
+            exp: now + 15 * 60,
+            video: { room, roomJoin: true, canPublish: false, canPublishData: false, canSubscribe: true, hidden: true },
+          })}`;
+          const signature = crypto.createHmac("sha256", env.LIVEKIT_API_SECRET).update(body).digest("base64url");
+          return json(res, 200, { url: env.LIVEKIT_URL, token: `${body}.${signature}` });
+        }
+        return json(res, 404, { error: "not_found" });
+      });
+      server.middlewares.use((req, res, next) => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        if (url.pathname !== "/api/call-events") return next();
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+        res.write(`data: {"type":"reset"}\n\n`);
+        for (const line of current) res.write(`data: ${line}\n\n`);
+        const client = { res, role: url.searchParams.get("role") === "widget" ? "widget" : "app" };
+        clients.add(client);
+        req.on("close", () => clients.delete(client));
+      });
     },
   };
 }
