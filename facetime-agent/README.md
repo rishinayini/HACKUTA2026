@@ -18,6 +18,9 @@ or later, Node 24 or Node 26 is required.
   agent's voice, keeps it in `.cache/`, and plays it the moment FaceTime is ready. The live model
   sometimes answered a greeting request late or not at all, and Chert's Mac ends a call it hears
   nothing from in the first 10 seconds.
+- **A written transcript from NVIDIA Parakeet.** `parakeet.mjs` streams the caller's audio to NVIDIA's
+  hosted Parakeet and writes each phrase into the call record. It runs beside Gemini, which still hears
+  the caller directly, and uses the same NVIDIA key. `PARAKEET=off` switches it off.
 - **Delegated reasoning.** `nemotron.mjs` gives Gemini an `ask_nemotron` tool that hands planning,
   analysis and summary tasks to a hosted NVIDIA Nemotron model: text only, one request at a time,
   with a time limit. Leave the NVIDIA key empty to run without it. `npm test` runs its mock tests.
@@ -35,6 +38,7 @@ or later, Node 24 or Node 26 is required.
 | `NEMOTRON_MODEL` | Nemotron model name | build.nvidia.com model page |
 | `NVIDIA_BASE_URL` | NVIDIA API address (optional) | Defaults to `https://integrate.api.nvidia.com/v1` |
 | `NEMOTRON_TIMEOUT_MS` | Time limit for one delegated request (optional) | Defaults to 10000 |
+| `PARAKEET` | `on` or `off` for the Parakeet transcript (optional) | Defaults to on when the NVIDIA key is set |
 | `AGENT_NAME` | The name the agent registers with | Your choice; `chert dev --agent` must match |
 
 The Chert sign-in is not in this file: `chert login` stores it on the computer.

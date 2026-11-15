@@ -8,14 +8,16 @@
   },
   "scripts": {
     "start": "node --env-file=.env.local agent.mjs start",
-    "check": "node --check chert-rooms.mjs && node --check agent.mjs && node --check face.mjs && node --check greet.mjs && node --check vision.mjs && node --check context.mjs && node --check nemotron.mjs && node --check greeting-audio.mjs",
+    "check": "node --check chert-rooms.mjs && node --check agent.mjs && node --check face.mjs && node --check greet.mjs && node --check vision.mjs && node --check context.mjs && node --check nemotron.mjs && node --check greeting-audio.mjs && node --check parakeet.mjs",
     "test": "node --test test/",
     "help": "node agent.mjs --help"
   },
   "dependencies": {
+    "@google/genai": "2.32.0",
+    "@grpc/grpc-js": "1.14.7",
+    "@grpc/proto-loader": "0.8.1",
     "@livekit/agents": "1.8.0",
     "@livekit/agents-plugin-google": "1.8.0",
-    "@google/genai": "2.32.0",
     "@livekit/rtc-node": "0.13.35",
     "sharp": "0.35.3"
   }

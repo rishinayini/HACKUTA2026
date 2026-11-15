@@ -9,6 +9,7 @@ import { greetOnBridgeReady } from './greet.mjs';
 import { watchCaller } from './vision.mjs';
 import { createCallContext } from './context.mjs';
 import { greetingFrames, loadGreetingAudio } from './greeting-audio.mjs';
+import { createTranscriber, parakeetConfigured, transcribeCaller } from './parakeet.mjs';
 import { askNemotronParameters, createNemotron, nemotronConfigured } from './nemotron.mjs';
 
 // Change these instructions to build your own agent. Keep replies conversational.
@@ -95,10 +96,19 @@ const agent = defineAgent({
       // One line per change, so the log shows exactly when the agent's voice was playing.
       console.log(`[agent] ${new Date().toISOString().slice(11, 23)} ${event.oldState} -> ${event.newState}`);
     });
-    // Gemini's transcripts of both sides arrive as conversation items.
+    // The caller's words come from NVIDIA Parakeet when the NVIDIA key is set: it listens to the call
+    // audio on the side, while Gemini still hears the caller directly. Gemini's own transcripts of
+    // both sides arrive as conversation items; its transcript of the caller is the fallback.
+    const transcriber = parakeetConfigured() ? createTranscriber({ onFinal: text => context.add('user', text) }) : undefined;
+    if (transcriber) {
+      const stopTranscribing = transcribeCaller(ctx.room, caller.identity, transcriber);
+      ctx.addShutdownCallback(async () => stopTranscribing());
+    }
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, event => {
       const { role, textContent } = event.item ?? {};
-      if (role === 'user' || role === 'assistant') context.add(role === 'user' ? 'user' : 'agent', textContent);
+      // While Parakeet is transcribing the caller, its text is the caller's record, not Gemini's.
+      if (role === 'assistant') context.add('agent', textContent);
+      else if (role === 'user' && !transcriber?.active) context.add('user', textContent);
     });
     const contextLog = setInterval(() => context.logStats('so far'), 30_000);
     ctx.addShutdownCallback(async () => {
