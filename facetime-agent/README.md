@@ -14,8 +14,13 @@ or later, Node 24 or Node 26 is required.
   summaries will read from it.
 - **Long calls.** Context compression is on, so a call with video is not limited to two minutes.
 - **Gemini Live instead of OpenAI.** The model is set by `GEMINI_LIVE_MODEL` in `.env.local`.
-- **The greeting cannot be cut off.** The agent stops listening while it greets, so the call is not
-  ended as silent.
+- **The greeting is a recording.** `greeting-audio.mjs` records the greeting once with Gemini, in the
+  agent's voice, keeps it in `.cache/`, and plays it the moment FaceTime is ready. The live model
+  sometimes answered a greeting request late or not at all, and Chert's Mac ends a call it hears
+  nothing from in the first 10 seconds.
+- **Delegated reasoning.** `nemotron.mjs` gives Gemini an `ask_nemotron` tool that hands planning,
+  analysis and summary tasks to a hosted NVIDIA Nemotron model: text only, one request at a time,
+  with a time limit. Leave the NVIDIA key empty to run without it. `npm test` runs its mock tests.
 
 ## Settings in `.env.local`
 
@@ -26,6 +31,10 @@ or later, Node 24 or Node 26 is required.
 | `LIVEKIT_API_SECRET` | LiveKit API secret | Same LiveKit project |
 | `GOOGLE_API_KEY` | Gemini API key with Live API access | https://aistudio.google.com/apikey |
 | `GEMINI_LIVE_MODEL` | Gemini Live model name (optional) | Defaults to the 2.5 native-audio preview |
+| `NVIDIA_API_KEY` | NVIDIA key for hosted Nemotron (optional) | https://build.nvidia.com |
+| `NEMOTRON_MODEL` | Nemotron model name | build.nvidia.com model page |
+| `NVIDIA_BASE_URL` | NVIDIA API address (optional) | Defaults to `https://integrate.api.nvidia.com/v1` |
+| `NEMOTRON_TIMEOUT_MS` | Time limit for one delegated request (optional) | Defaults to 10000 |
 | `AGENT_NAME` | The name the agent registers with | Your choice; `chert dev --agent` must match |
 
 The Chert sign-in is not in this file: `chert login` stores it on the computer.
