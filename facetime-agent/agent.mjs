@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { AutoSubscribe, defineAgent, voice } from '@livekit/agents';
+import { AutoSubscribe, defineAgent, llm, voice } from '@livekit/agents';
 import { realtime } from '@livekit/agents-plugin-google';
 import { TurnCoverage } from '@google/genai';
 import { LocalVideoTrack, TrackSource, VideoBufferType, VideoFrame, VideoSource } from '@livekit/rtc-node';
@@ -8,6 +8,8 @@ import { runAgent } from './chert-rooms.mjs';
 import { greetOnBridgeReady } from './greet.mjs';
 import { watchCaller } from './vision.mjs';
 import { createCallContext } from './context.mjs';
+import { greetingFrames, loadGreetingAudio } from './greeting-audio.mjs';
+import { askNemotronParameters, createNemotron, nemotronConfigured } from './nemotron.mjs';
 
 // Change these instructions to build your own agent. Keep replies conversational.
 const instructions = `You are a friendly AI assistant on a FaceTime video call.
@@ -18,10 +20,26 @@ and then help with it. If the picture is unclear or you see no camera picture, s
 and ask them to hold it steady or closer. Never invent details you cannot see.
 The caller sees a simple animated face while you talk.
 Keep each reply to one to three short sentences. Be clear that you are an AI.`;
-// Said once, as soon as FaceTime is ready. Keep it short: it is the first thing the caller hears.
-// Three sentences on purpose: the Mac ends a call it hears nothing from in the first 10 seconds,
-// so the greeting keeps sound flowing for most of that time.
-const greeting = 'Greet the caller warmly in three sentences: say hello and that you are an AI assistant, say you can look at drawings and workflow diagrams they hold up to the camera, then ask what they want to work on.';
+// Added to the instructions only when the NVIDIA settings are present.
+const delegationInstructions = `
+You have a tool, ask_nemotron, that hands a task to a stronger reasoning model. Use it only when the
+caller asks for planning, a step-by-step analysis of a workflow or diagram, a deeper explanation, or a
+summary of the call. Do not use it for greetings, small talk or simple questions you can answer yourself.
+Before you call it, say one short sentence such as "Give me a moment to think that through", because it
+takes several seconds. In visual_context, describe what you actually see that matters. When the answer
+comes back, say it to the caller in your own words in a few sentences. If the tool reports an error,
+tell the caller briefly and answer as well as you can yourself.`;
+// Said once, as soon as FaceTime is ready. These exact words are recorded ahead of time (see
+// greeting-audio.mjs) and played into the call, so the first sound never waits on the live model.
+// About 8 seconds on purpose: the Mac ends a call it hears nothing from in the first 10 seconds.
+const greetingText = 'Hi there! I am an AI assistant, and I can see what your camera shows. Hold up a drawing or a workflow diagram and I will help you with it. What would you like to work on?';
+// Used only if the recording could not be made: the live model is asked to greet instead.
+const greeting = `Greet the caller by saying: ${greetingText}`;
+const VOICE = 'Puck';
+const MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
+const greetingNote = `
+When the call connects, the caller hears this greeting in your voice: "${greetingText}"
+Do not greet or introduce yourself again; carry on from there.`;
 
 const agent = defineAgent({
   entry: async ctx => {
@@ -29,6 +47,8 @@ const agent = defineAgent({
     await ctx.connect(undefined, AutoSubscribe.SUBSCRIBE_ALL);
     // Chert prepares a room before a caller exists. Join promptly so Chert can
     // find us, but wait before opening a paid model session or sending video.
+    // Record the greeting now if it is not on disk yet: a waiting room has no caller, so there is time.
+    const greetingAudio = loadGreetingAudio({ text: greetingText, voice: VOICE, model: MODEL });
     const caller = await ctx.waitForParticipant();
 
     // Video: one camera track, published by this agent. The Mac shows video only
@@ -41,12 +61,26 @@ const agent = defineAgent({
     await ctx.room.localParticipant.publishTrack(track, { source: TrackSource.SOURCE_CAMERA });
     const timer = setInterval(frame, 1000 / FPS);
 
+    // What was said on this call, kept in memory with times, for delegated requests and recovery
+    // summaries.
+    const context = createCallContext();
+    // Delegated reasoning through NVIDIA's hosted Nemotron, when its key and model are set.
+    const delegate = nemotronConfigured();
+    const nemotron = createNemotron({ context });
+    const tools = delegate ? {
+      ask_nemotron: llm.tool({
+        description: 'Hand a planning, analysis, deeper-reasoning or summary task to a stronger reasoning model. Takes several seconds. Only one request can run at a time.',
+        parameters: askNemotronParameters,
+        execute: async (args, options) => nemotron.ask(args, options?.abortSignal),
+      }),
+    } : undefined;
+
     const session = new voice.AgentSession({
       // Gemini Live. Reads GOOGLE_API_KEY from .env.local. Keep a 2.5 model: the
       // 3.1 live model cannot be told to speak first, so the greeting would fail.
       llm: new realtime.RealtimeModel({
-        model: process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025',
-        voice: 'Puck',
+        model: MODEL,
+        voice: VOICE,
         // Count camera pictures sent while the caller was silent as part of their next question,
         // so "what is this?" covers what was already on screen.
         realtimeInputConfig: { turnCoverage: TurnCoverage.TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO },
@@ -61,9 +95,7 @@ const agent = defineAgent({
       // One line per change, so the log shows exactly when the agent's voice was playing.
       console.log(`[agent] ${new Date().toISOString().slice(11, 23)} ${event.oldState} -> ${event.newState}`);
     });
-    // What was said on this call, kept in memory with times, for delegated requests and recovery
-    // summaries. Gemini's transcripts of both sides arrive as conversation items.
-    const context = createCallContext();
+    // Gemini's transcripts of both sides arrive as conversation items.
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, event => {
       const { role, textContent } = event.item ?? {};
       if (role === 'user' || role === 'assistant') context.add(role === 'user' ? 'user' : 'agent', textContent);
@@ -82,7 +114,7 @@ const agent = defineAgent({
     });
     await session.start({
       room: ctx.room,
-      agent: new voice.Agent({ instructions }),
+      agent: new voice.Agent({ instructions: instructions + greetingNote + (delegate ? delegationInstructions : ''), tools }),
       record: false,
       inputOptions: {
         participantIdentity: caller.identity,
@@ -99,16 +131,13 @@ const agent = defineAgent({
     // of that. Participant arrival alone is not readiness, so there is no greeting
     // on it. Without the signal there is no greeting, and the caller speaks first.
     //
-    // The agent stops listening while it greets. Sound from the caller's side in the first
-    // second or two otherwise interrupts the greeting, and the Mac ends the call as silent.
-    // Listening comes back when the greeting has played, or after 12 seconds at the latest.
+    // The greeting is the recording, played as speech that cannot be interrupted. If there is no
+    // recording, the live model is asked to greet, which can be late.
+    const pcm = await greetingAudio;
     const stopGreeting = greetOnBridgeReady(ctx.room, () => {
-      let listening = false;
-      const listen = () => { if (!listening) { listening = true; session.input.setAudioEnabled(true); } };
-      session.input.setAudioEnabled(false);
-      const fallback = setTimeout(listen, 12000);
-      try { session.generateReply({ instructions: greeting }).addDoneCallback(() => { clearTimeout(fallback); listen(); }); }
-      catch (error) { clearTimeout(fallback); listen(); throw error; }
+      if (pcm) session.say(greetingText, { audio: greetingFrames(pcm), allowInterruptions: false, addToChatCtx: true });
+      else session.generateReply({ instructions: greeting });
+      console.log(`[agent] ${new Date().toISOString().slice(11, 23)} greeting started (${pcm ? 'recording' : 'live model'})`);
     });
     ctx.addShutdownCallback(async () => stopGreeting());
 
