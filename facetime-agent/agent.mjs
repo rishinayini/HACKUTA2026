@@ -14,6 +14,7 @@ import { createTranscriber, parakeetConfigured, transcribeCaller } from './parak
 import { askNemotronParameters, createNemotron, nemotronConfigured } from './nemotron.mjs';
 import { createDiagramReader, readDiagramParameters } from './diagram.mjs';
 import { emitCallEvent, watchHangup } from './events.mjs';
+import { recordCallEvent } from './tiger-data.mjs';
 
 // Change these instructions to build your own agent. Keep replies conversational.
 const instructions = `You are a friendly AI assistant on a live video call. Your main job is to help the
@@ -92,6 +93,10 @@ const agent = defineAgent({
     // Record the greeting now if it is not on disk yet: a waiting room has no caller, so there is time.
     const greetingAudio = loadGreetingAudio({ text: greetingText, voice: VOICE, model: MODEL });
     const caller = await ctx.waitForParticipant();
+    const callId = ctx.job?.id || ctx.room.name;
+    let callMetadata = {};
+    try { callMetadata = JSON.parse(ctx.job?.metadata || '{}'); } catch { /* metadata is optional */ }
+    void recordCallEvent({ callId, event: 'call_started', media: callMetadata.media });
 
     // Video: one camera track, published by this agent. The Mac shows video only
     // from the participant that speaks, so the picture and the voice stay together.
@@ -149,6 +154,7 @@ const agent = defineAgent({
       const wasSpeaking = speaking;
       speaking = event.newState === 'speaking';
       if (speaking !== wasSpeaking) emitCallEvent('agent_state', { speaking });
+      void recordCallEvent({ callId, event: 'agent_state', agentState: event.newState });
       // One line per change, so the log shows exactly when the agent's voice was playing.
       console.log(`[agent] ${new Date().toISOString().slice(11, 23)} ${event.oldState} -> ${event.newState}`);
     });
@@ -222,11 +228,13 @@ const agent = defineAgent({
     // recording, the live model is asked to greet, which can be late.
     const pcm = await greetingAudio;
     const stopGreeting = greetOnBridgeReady(ctx.room, () => {
+      void recordCallEvent({ callId, event: 'bridge_ready' });
       if (pcm) session.say(greetingText, { audio: greetingFrames(pcm), allowInterruptions: false, addToChatCtx: true });
       else session.generateReply({ instructions: greeting });
       console.log(`[agent] ${new Date().toISOString().slice(11, 23)} greeting started (${pcm ? 'recording' : 'live model'})`);
     });
     ctx.addShutdownCallback(async () => stopGreeting());
+    ctx.addShutdownCallback(async reason => recordCallEvent({ callId, event: 'call_ended', details: { reason: String(reason || 'ended').slice(0, 100) } }));
 
     // Vision: pass the caller's camera to Gemini, one small JPEG a second. The agent framework
     // does not forward video for this model, so the pictures go straight to the live session.

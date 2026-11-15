@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node --env-file=.env.local agent.mjs start",
-    "check": "node --check chert-rooms.mjs && node --check agent.mjs && node --check face.mjs && node --check greet.mjs && node --check vision.mjs && node --check context.mjs && node --check nemotron.mjs && node --check greeting-audio.mjs && node --check parakeet.mjs && node --check diagram.mjs && node --check events.mjs",
+    "check": "node --check chert-rooms.mjs && node --check agent.mjs && node --check face.mjs && node --check greet.mjs && node --check vision.mjs && node --check context.mjs && node --check nemotron.mjs && node --check greeting-audio.mjs && node --check parakeet.mjs && node --check diagram.mjs && node --check events.mjs && node --check tiger-data.mjs",
     "test": "node --test test/",
     "help": "node agent.mjs --help"
   },
@@ -20,6 +20,7 @@
     "@livekit/agents-plugin-google": "1.8.0",
     "@livekit/noise-cancellation-node": "0.3.1",
     "@livekit/rtc-node": "0.13.35",
+    "pg": "^8.16.3",
     "sharp": "0.35.3"
   }
 }
