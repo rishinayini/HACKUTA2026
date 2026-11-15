@@ -7,7 +7,7 @@ or later, Node 24 or Node 26 is required.
 ## What this version adds
 
 - **It sees the caller's camera.** `vision.mjs` reads the caller's video from the call, sends Gemini
-  about one JPEG a second (at most 640 pixels wide), and the agent is told to describe drawings and
+  about one JPEG a second, and the agent is told to describe drawings and
   workflow diagrams held up to the camera.
 - **It keeps a bounded record of the call.** `context.mjs` holds recent transcript lines with their
   times, in memory only, and clears them when the call ends. Delegated requests and recovery
@@ -21,6 +21,13 @@ or later, Node 24 or Node 26 is required.
 - **A written transcript from NVIDIA Parakeet.** `parakeet.mjs` streams the caller's audio to NVIDIA's
   hosted Parakeet and writes each phrase into the call record. It runs beside Gemini, which still hears
   the caller directly, and uses the same NVIDIA key. `PARAKEET=off` switches it off.
+- **Workflow-diagram review.** The instructions tell the agent to read a diagram from start to end,
+  following the arrows, and then name the biggest risks with a fix. Camera pictures go to Gemini at
+  1024 pixels wide (`VISION_MAX_WIDTH`), because 640 misread small handwriting in a test.
+- **Background voice cancellation and faster turns.** LiveKit's background voice cancellation cleans
+  the caller's audio, and Gemini ends the caller's turn after half a second of silence
+  (`VAD_SILENCE_MS`). `NOISE_CANCELLATION=off` disables the first.
+- **Transcript on screen.** `SHOW_TRANSCRIPT=on` prints what was said in the agent's terminal.
 - **Delegated reasoning.** `nemotron.mjs` gives Gemini an `ask_nemotron` tool that hands planning,
   analysis and summary tasks to a hosted NVIDIA Nemotron model: text only, one request at a time,
   with a time limit. Leave the NVIDIA key empty to run without it. `npm test` runs its mock tests.
@@ -39,6 +46,10 @@ or later, Node 24 or Node 26 is required.
 | `NVIDIA_BASE_URL` | NVIDIA API address (optional) | Defaults to `https://integrate.api.nvidia.com/v1` |
 | `NEMOTRON_TIMEOUT_MS` | Time limit for one delegated request (optional) | Defaults to 10000 |
 | `PARAKEET` | `on` or `off` for the Parakeet transcript (optional) | Defaults to on when the NVIDIA key is set |
+| `VISION_MAX_WIDTH` | Width of camera pictures sent to Gemini (optional) | Defaults to 1024 |
+| `VAD_SILENCE_MS` | Silence before Gemini answers, in ms (optional) | Defaults to 500 |
+| `NOISE_CANCELLATION` | `on` or `off` (optional) | Defaults to on |
+| `SHOW_TRANSCRIPT` | `on` prints the transcript in the terminal (optional) | Defaults to off |
 | `AGENT_NAME` | The name the agent registers with | Your choice; `chert dev --agent` must match |
 
 The Chert sign-in is not in this file: `chert login` stores it on the computer.

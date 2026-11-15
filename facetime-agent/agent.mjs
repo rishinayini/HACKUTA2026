@@ -1,7 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import { AutoSubscribe, defineAgent, llm, voice } from '@livekit/agents';
 import { realtime } from '@livekit/agents-plugin-google';
-import { TurnCoverage } from '@google/genai';
+import { EndSensitivity, StartSensitivity, TurnCoverage } from '@google/genai';
+import { BackgroundVoiceCancellation } from '@livekit/noise-cancellation-node';
 import { LocalVideoTrack, TrackSource, VideoBufferType, VideoFrame, VideoSource } from '@livekit/rtc-node';
 import { drawFace, FPS, HEIGHT, WIDTH } from './face.mjs';
 import { runAgent } from './chert-rooms.mjs';
@@ -13,19 +14,26 @@ import { createTranscriber, parakeetConfigured, transcribeCaller } from './parak
 import { askNemotronParameters, createNemotron, nemotronConfigured } from './nemotron.mjs';
 
 // Change these instructions to build your own agent. Keep replies conversational.
-const instructions = `You are a friendly AI assistant on a FaceTime video call.
-You can hear the caller and you can see what their camera shows, about one picture a second.
-The caller may hold up drawings, whiteboards or workflow diagrams. When they ask about what
-they are showing, describe what you actually see: the boxes, arrows, labels and their order,
-and then help with it. If the picture is unclear or you see no camera picture, say so plainly
-and ask them to hold it steady or closer. Never invent details you cannot see.
+const instructions = `You are a friendly AI assistant on a live video call. Your main job is to review
+project workflow diagrams that the caller holds up to the camera, and to give advice on them.
+You hear the caller directly and you see what their camera shows, about one picture a second.
+
+When the caller shows a diagram or asks about one:
+- First read it from start to end: name each step in order, following the arrows, and mention
+  branches, loops and any handwritten notes. Say this briefly so the caller can correct you.
+- Then give advice: point out the one or two most important problems or risks, such as a missing
+  step, a bottleneck, a step with no owner, an unclear decision, or a dead end, and suggest a fix.
+- Answer what the caller actually asked. If they ask about one step, talk about that step.
+- If part of the diagram is too small, blurry, cut off or hidden, say which part and ask them to
+  hold it closer or steadier. Never guess a label or a number you cannot read.
+If you see no camera picture, say so plainly. Never invent details you cannot see.
 The caller sees a simple animated face while you talk.
-Keep each reply to one to three short sentences. Be clear that you are an AI.`;
+Keep each reply to a few short sentences, and let the caller steer. Be clear that you are an AI.`;
 // Added to the instructions only when the NVIDIA settings are present.
 const delegationInstructions = `
 You have a tool, ask_nemotron, that hands a task to a stronger reasoning model. Use it only when the
-caller asks for planning, a step-by-step analysis of a workflow or diagram, a deeper explanation, or a
-summary of the call. Do not use it for greetings, small talk or simple questions you can answer yourself.
+caller asks for a full plan, a deep step-by-step analysis of a whole workflow, a detailed explanation, or a
+summary of the call. Give quick advice on a diagram yourself. Do not use it for greetings, small talk or simple questions you can answer yourself.
 Before you call it, say one short sentence such as "Give me a moment to think that through", because it
 takes several seconds. In visual_context, describe what you actually see that matters. When the answer
 comes back, say it to the caller in your own words in a few sentences. If the tool reports an error,
@@ -37,6 +45,14 @@ const greetingText = 'Hi there! I am an AI assistant, and I can see what your ca
 // Used only if the recording could not be made: the live model is asked to greet instead.
 const greeting = `Greet the caller by saying: ${greetingText}`;
 const VOICE = 'Puck';
+// How long the caller must be quiet before Gemini treats their turn as finished, in milliseconds.
+// Shorter answers sooner but can cut in on a pause mid-sentence. VAD_SILENCE_MS overrides it.
+const SILENCE_MS = Number(process.env.VAD_SILENCE_MS) > 0 ? Number(process.env.VAD_SILENCE_MS) : 500;
+// Width in pixels of the camera pictures sent to Gemini. At 640 it misread small handwriting on a
+// test diagram ("3 days" as "9 days"); at 1024 it read it correctly. VISION_MAX_WIDTH overrides it.
+const VISION_WIDTH = Number(process.env.VISION_MAX_WIDTH) > 0 ? Number(process.env.VISION_MAX_WIDTH) : 1024;
+// NOISE_CANCELLATION=off sends the call audio to the models as it is.
+const CLEAN_AUDIO = String(process.env.NOISE_CANCELLATION ?? '').toLowerCase() !== 'off';
 const MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
 const greetingNote = `
 When the call connects, the caller hears this greeting in your voice: "${greetingText}"
@@ -84,7 +100,17 @@ const agent = defineAgent({
         voice: VOICE,
         // Count camera pictures sent while the caller was silent as part of their next question,
         // so "what is this?" covers what was already on screen.
-        realtimeInputConfig: { turnCoverage: TurnCoverage.TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO },
+        realtimeInputConfig: {
+          turnCoverage: TurnCoverage.TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO,
+          // Answer sooner: end the caller's turn after a short silence, and be quick to notice it.
+          // VAD_START_SENSITIVITY=low makes Gemini need clearer speech before it counts a turn as
+          // started; it is left at Gemini's default because noise cancellation already removes the room.
+          automaticActivityDetection: {
+            silenceDurationMs: SILENCE_MS,
+            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+            ...(String(process.env.VAD_START_SENSITIVITY ?? '').toLowerCase() === 'low' ? { startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW } : {}),
+          },
+        },
         // Without compression Gemini limits a session with video to about 2 minutes. The sliding
         // window drops the oldest turns instead. Session resumption and reconnecting when Gemini
         // announces a disconnect (goAway) are handled by the plugin.
@@ -99,7 +125,14 @@ const agent = defineAgent({
     // The caller's words come from NVIDIA Parakeet when the NVIDIA key is set: it listens to the call
     // audio on the side, while Gemini still hears the caller directly. Gemini's own transcripts of
     // both sides arrive as conversation items; its transcript of the caller is the fallback.
-    const transcriber = parakeetConfigured() ? createTranscriber({ onFinal: text => context.add('user', text) }) : undefined;
+    // SHOW_TRANSCRIPT=on prints each line in this terminal as it arrives, with who said it and which
+    // recogniser wrote it. Off by default: the logs otherwise never contain what was said.
+    const showTranscript = String(process.env.SHOW_TRANSCRIPT ?? '').toLowerCase() === 'on';
+    const record = (kind, text, source) => {
+      context.add(kind, text);
+      if (showTranscript && String(text ?? '').trim()) console.log(`[transcript] ${new Date().toISOString().slice(11, 19)} ${kind === 'user' ? 'caller' : 'agent'} (${source}): ${String(text).trim()}`);
+    };
+    const transcriber = parakeetConfigured() ? createTranscriber({ onFinal: text => record('user', text, 'parakeet') }) : undefined;
     if (transcriber) {
       const stopTranscribing = transcribeCaller(ctx.room, caller.identity, transcriber);
       ctx.addShutdownCallback(async () => stopTranscribing());
@@ -107,8 +140,8 @@ const agent = defineAgent({
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, event => {
       const { role, textContent } = event.item ?? {};
       // While Parakeet is transcribing the caller, its text is the caller's record, not Gemini's.
-      if (role === 'assistant') context.add('agent', textContent);
-      else if (role === 'user' && !transcriber?.active) context.add('user', textContent);
+      if (role === 'assistant') record('agent', textContent, 'gemini');
+      else if (role === 'user' && !transcriber?.active) record('user', textContent, 'gemini');
     });
     const contextLog = setInterval(() => context.logStats('so far'), 30_000);
     ctx.addShutdownCallback(async () => {
@@ -129,6 +162,9 @@ const agent = defineAgent({
       inputOptions: {
         participantIdentity: caller.identity,
         audioEnabled: true,
+        // Strip other voices and room noise from the caller's audio before Gemini hears it, so its
+        // voice detection reacts to the caller only. Runs through LiveKit Cloud.
+        ...(CLEAN_AUDIO ? { noiseCancellation: BackgroundVoiceCancellation() } : {}),
         videoEnabled: false,
         textEnabled: false,
         closeOnDisconnect: true,
@@ -158,7 +194,7 @@ const agent = defineAgent({
         type: 'realtime_input',
         value: { mediaChunks: [{ mimeType: 'image/jpeg', data: jpegBase64 }] },
       });
-    });
+    }, { maxWidth: VISION_WIDTH, quality: 80 });
     ctx.addShutdownCallback(async () => stopWatching());
   },
 });

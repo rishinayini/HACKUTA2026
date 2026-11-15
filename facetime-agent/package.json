@@ -18,6 +18,7 @@
     "@grpc/proto-loader": "0.8.1",
     "@livekit/agents": "1.8.0",
     "@livekit/agents-plugin-google": "1.8.0",
+    "@livekit/noise-cancellation-node": "0.3.1",
     "@livekit/rtc-node": "0.13.35",
     "sharp": "0.35.3"
   }

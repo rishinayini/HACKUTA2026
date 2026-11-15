@@ -2,7 +2,7 @@
 //
 // On a FaceTime Video call the Chert bridge can publish the caller's camera into the room as a video
 // track (facetime-remote-video), when caller capture is enabled on the line. This file reads that
-// track, takes about one frame a second, shrinks it to a JPEG at most 640 pixels wide, and hands it to
+// track, takes about one frame a second, shrinks it to a JPEG (the agent asks for 1024 pixels wide), and hands it to
 // send(). Gemini Live accepts at most about one frame a second, so sending more only costs money.
 // The logs record times and sizes only, never the picture.
 import sharp from 'sharp';
