@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a1118">
+  <title>Signal / Live Ops</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a1118;--panel:#111c25;--line:#24333d;--muted:#8da1ad;--text:#edf5f4;--mint:#81f2c0;--blue:#77c9ff;--amber:#ffc875;--red:#ff827f}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 74% -16%,#18303a 0,transparent 39%),var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+    .shell{max-width:1320px;margin:auto;padding:34px 30px 52px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:42px}.brand{display:flex;align-items:center;gap:12px;font-weight:750;letter-spacing:.12em;font-size:12px}.mark{width:34px;height:34px;border:1px solid #3a7865;border-radius:11px;display:grid;place-items:center;color:var(--mint);font-size:19px;background:#10251f}.brand small{display:block;color:var(--muted);font-weight:500;letter-spacing:.02em;margin-top:2px}.live{display:flex;align-items:center;gap:9px;color:#bfe9d6;font-size:12px;border:1px solid #264c3d;background:#11231d;border-radius:99px;padding:8px 12px}.dot{width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 13px var(--mint);animation:pulse 1.8s infinite}@keyframes pulse{50%{opacity:.35}}
+    .eyebrow{color:var(--mint);text-transform:uppercase;letter-spacing:.18em;font:600 10px ui-monospace,SFMono-Regular,monospace}.title-row{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}.title{font-size:clamp(30px,5vw,49px);line-height:1.05;letter-spacing:-.045em;margin:9px 0 0}.subtitle{color:var(--muted);margin:12px 0 0}.updated{color:var(--muted);font:11px ui-monospace,monospace;text-align:right;padding-bottom:5px}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}.card{background:linear-gradient(145deg,#14212a,#101922);border:1px solid var(--line);border-radius:15px;padding:19px 20px;min-height:132px}.label{color:var(--muted);font-size:12px}.value{font-size:35px;font-weight:650;letter-spacing:-.04em;margin-top:12px}.hint{font-size:11px;color:#79909b;margin-top:4px}.mint{color:var(--mint)}.blue{color:var(--blue)}.amber{color:var(--amber)}
+    .lower{display:grid;grid-template-columns:1.05fr 1.95fr;gap:13px;margin-top:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:19px 20px;min-width:0}.panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.panel h2{font-size:13px;font-weight:650;margin:0}.mini{font:10px ui-monospace,monospace;color:var(--muted)}.bars{height:170px;display:flex;align-items:end;gap:7px;padding:8px 2px 0;border-bottom:1px solid var(--line)}.bar-col{height:100%;flex:1;display:flex;flex-direction:column;justify-content:end;align-items:center;gap:8px;min-width:0}.bar{width:min(26px,80%);min-height:2px;border-radius:5px 5px 1px 1px;background:linear-gradient(0deg,#28634f,var(--mint));opacity:.9;transition:height .35s}.bar-label{font:9px ui-monospace,monospace;color:#718793}.legend{display:flex;justify-content:space-between;color:#728793;font:10px ui-monospace,monospace;margin-top:10px}
+    .events{overflow:auto;max-height:445px}.event{display:grid;grid-template-columns:83px 1fr auto;gap:12px;align-items:center;padding:11px 1px;border-bottom:1px solid #202d36}.event:last-child{border-bottom:0}.time{font:10px ui-monospace,monospace;color:#80949f}.ev-name{font-size:12px;font-weight:600}.ev-sub{font:10px ui-monospace,monospace;color:#788d98;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:390px}.tag{font:9px ui-monospace,monospace;padding:4px 7px;border-radius:5px;border:1px solid #31434d;color:#a9bdc6;white-space:nowrap}.tag.start,.tag.ready{color:var(--mint);border-color:#285742;background:#12271f}.tag.end{color:var(--red);border-color:#5c3234;background:#28191b}.empty{color:var(--muted);font-size:12px;padding:30px 0;text-align:center}.error{display:none;border:1px solid #693b39;background:#291b1b;color:#ffd2cb;padding:13px 16px;border-radius:10px;margin:0 0 14px;font-size:12px}.foot{display:flex;justify-content:space-between;color:#607580;font:10px ui-monospace,monospace;margin-top:18px}
+    @media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.lower{grid-template-columns:1fr}.shell{padding:24px 16px 40px}.top{margin-bottom:34px}.title-row{align-items:start;gap:15px;flex-direction:column}.updated{text-align:left}.events{max-height:400px}}@media(max-width:420px){.card{padding:15px;min-height:115px}.value{font-size:29px}.event{grid-template-columns:68px 1fr}.tag{display:none}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top"><div class="brand"><div class="mark">⌁</div><div>SIGNAL<small>CHERT × TIGER DATA</small></div></div><div class="live"><span class="dot"></span>LIVE · 2 SEC</div></header>
+    <div class="title-row"><div><div class="eyebrow">Voice agent / operations</div><h1 class="title">Live call telemetry</h1><p class="subtitle">A live view of agent activity and call events.</p></div><div class="updated" id="updated">Connecting…</div></div>
+    <div class="error" id="error"></div>
+    <section class="grid">
+      <article class="card"><div class="label">Active calls</div><div class="value mint" id="active">—</div><div class="hint">latest state per call</div></article>
+      <article class="card"><div class="label">Calls · 24 hours</div><div class="value blue" id="calls">—</div><div class="hint">call starts recorded</div></article>
+      <article class="card"><div class="label">Events · 24 hours</div><div class="value amber" id="events-total">—</div><div class="hint">ordered agent events</div></article>
+      <article class="card"><div class="label">Latest event</div><div class="value" style="font-size:19px;margin-top:20px" id="latest">—</div><div class="hint" id="latest-sub">waiting for telemetry</div></article>
+    </section>
+    <section class="lower">
+      <article class="panel"><div class="panel-head"><h2>Event volume</h2><span class="mini">LAST 12 HOURS</span></div><div class="bars" id="bars"></div><div class="legend"><span>12h ago</span><span>now</span></div></article>
+      <article class="panel"><div class="panel-head"><h2>Recent activity</h2><span class="mini" id="event-count">LIVE FEED</span></div><div class="events" id="feed"><div class="empty">Waiting for call events…</div></div></article>
+    </section>
+    <footer class="foot"><span>LOCAL DASHBOARD · DATA FROM TIGER CLOUD</span><span>CALL CONTENT IS NOT STORED</span></footer>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const fmt = value => Number(value || 0).toLocaleString();
+    const escapeHtml = value => String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const timeFmt = value => new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(value));
+    const shortId = value => value.length > 18 ? value.slice(0,8)+'…'+value.slice(-6) : value;
+    function drawBars(rows){
+      const counts = new Map(rows.map(row=>[new Date(row.hour).getTime(),Number(row.count)]));
+      const now = new Date(); now.setMinutes(0,0,0); const values=[];
+      for(let i=11;i>=0;i--){const t=now.getTime()-i*3600000;values.push({t,count:counts.get(t)||0});}
+      const max=Math.max(1,...values.map(x=>x.count));
+      $('bars').innerHTML=values.map(({t,count})=>`<div class="bar-col" title="${new Date(t).toLocaleString()}: ${count} events"><div class="bar" style="height:${Math.max(2,count/max*100)}%"></div><span class="bar-label">${new Date(t).getHours().toString().padStart(2,'0')}</span></div>`).join('');
+    }
+    function drawFeed(rows){
+      if(!rows.length){$('feed').innerHTML='<div class="empty">No events yet. Start the agent and make a call.</div>';return;}
+      $('feed').innerHTML=rows.map(row=>{
+        const event=String(row.event||'event'), tagClass=event==='call_started'?'start':event==='bridge_ready'?'ready':event==='call_ended'?'end':'';
+        const sub=[shortId(String(row.call_id||'')),`#${row.event_seq??'—'}`,row.agent_state].filter(Boolean).join(' · ');
+        return `<div class="event"><time class="time">${timeFmt(row.time)}</time><div><div class="ev-name">${escapeHtml(event.replaceAll('_',' '))}</div><div class="ev-sub">${escapeHtml(sub)}</div></div><span class="tag ${tagClass}">${escapeHtml(row.media||'AGENT')}</span></div>`;
+      }).join('');
+    }
+    async function refresh(){
+      try{
+        const response=await fetch('/api/live',{cache:'no-store'});const data=await response.json();
+        if(!response.ok) throw new Error(data.error||'Tiger Data query failed');
+        $('error').style.display='none';$('active').textContent=fmt(data.summary.active_calls);$('calls').textContent=fmt(data.summary.calls_24h);$('events-total').textContent=fmt(data.summary.events_24h);
+        $('updated').textContent='UPDATED '+timeFmt(data.updatedAt);$('event-count').textContent=`${data.events.length} MOST RECENT`;
+        if(data.events.length){$('latest').textContent=String(data.events[0].event).replaceAll('_',' ');$('latest-sub').textContent=`${timeFmt(data.events[0].time)} · #${data.events[0].event_seq??'—'}`;}
+        drawBars(data.hourly);drawFeed(data.events);
+      }catch(error){$('error').textContent=error.message;$('error').style.display='block';$('updated').textContent='DATABASE UNAVAILABLE';}
+    }
+    refresh();setInterval(refresh,2000);
+  </script>
+</body>
+</html>

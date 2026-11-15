@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node --env-file=.env.local agent.mjs start",
+    "dashboard": "node --env-file=.env.local dashboard.mjs",
     "check": "node --check chert-rooms.mjs && node --check agent.mjs && node --check face.mjs && node --check greet.mjs && node --check tiger-data.mjs",
     "help": "node agent.mjs --help"
   },

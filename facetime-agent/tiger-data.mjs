@@ -22,6 +22,12 @@ function getPool() {
   return pool;
 }
 
+export async function queryTigerData(text, values = []) {
+  const db = getPool();
+  if (!db) throw new Error('TIGER_DATABASE_URL is not configured');
+  return db.query(text, values);
+}
+
 /** Best-effort event insert; telemetry failures must not interrupt a live call. */
 export async function recordCallEvent({ callId, event, agentState, media, details }) {
   const db = getPool();

@@ -44,6 +44,11 @@ dashboards. This stores operational metadata only; it does not store
 audio, transcripts, caller names, or phone numbers. Database errors are logged
 and do not interrupt calls. Leave the variable empty to disable telemetry.
 
+Start the local live dashboard with `npm run dashboard`, then open
+`http://127.0.0.1:4173`. It refreshes every two seconds and shows active calls,
+24-hour totals, hourly event volume, and the latest sequential events. It binds
+to localhost only.
+
 ## The greeting
 
 The Mac ends a call that hears nothing from the agent within 10 seconds of
