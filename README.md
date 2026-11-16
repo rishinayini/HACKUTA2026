@@ -138,4 +138,4 @@ npm run check   # syntax check for every module
 
 ## Team
 
-Built by [Rishi Nayini](https://github.com/rishinayini) and teammates at HackUTA 2026.
+Built by [Rishi Nayini](https://github.com/rishinayini), [Prathmesh Durugkar](https://github.com/pumkinhead456), and [Kanishk Kumar](https://github.com/kanishkkumar740) at HackUTA 2026.
